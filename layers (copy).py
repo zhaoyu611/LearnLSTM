@@ -22,9 +22,6 @@ def layer_norm(inp, eps=1e-5, scope=None):
     ln_inp = gain * ln_inp + bias   
     return ln_inp
 
-def dynamic_layer_norm(inp, eps=1e-5, scope=None):
-    pass
-
 
 def hyper_norm(layer, hyper_output, embedding_size, num_units,
                scope="hyper", use_bias=True):
@@ -114,71 +111,71 @@ class HyperLSTMCell(tf.contrib.rnn.RNNCell):
             h = total_h[:, 0:self.num_units]
             hyper_state = tf.contrib.rnn.LSTMStateTuple(total_c[:, self.num_units:],
                                                         total_h[:, self.num_units:])
-            x_size = x.get_shape().as_list()[1]
-            batch_size = x.get_shape().as_list()[0]
-            embedding_size = self.hyper_embedding_size
-            num_units = self.num_units
+        x_size = x.get_shape().as_list()[1]
+        batch_size = x.get_shape().as_list()[0]
+        embedding_size = self.hyper_embedding_size
+        num_units = self.num_units
 
-            #define weights and bias for main network
-            W_xh = tf.get_variable('W_xh', initializer=tf.random_normal([x_size, 4*num_units]), dtype=tf.float32)
-            W_hh = tf.get_variable('W_hh', initializer=tf.random_normal([num_units, 4*num_units]), dtype=tf.float32)
-            bias = tf.get_variable('bias', initializer=tf.random_normal([4*num_units]), dtype=tf.float32)
+        #define weights and bias for main network
+        W_xh = tf.get_variable('W_xh', initializer=tf.random_normal([x_size, 4*num_units]), dtype=tf.float32)
+        W_hh = tf.get_variable('W_hh', initializer=tf.random_normal([num_units, 4*num_units]), dtype=tf.float32)
+        bias = tf.get_variable('bias', initializer=tf.random_normal([4*num_units]), dtype=tf.float32)
 
-            #define hyper network input, shape : [batch_size, x_size+num_units]
-            hyper_input = tf.concat([x,h], 1)
-            hyper_output, hyper_new_state = self.hyper_cell(hyper_input, hyper_state)
+        #define hyper network input, shape : [batch_size, x_size+num_units]
+        hyper_input = tf.concat([x,h], 1)
+        hyper_output, hyper_new_state = self.hyper_cell(hyper_input, hyper_state)
 
-            xh = tf.matmul(x, W_xh)
-            hh = tf.matmul(h, W_hh)
+        xh = tf.matmul(x, W_xh)
+        hh = tf.matmul(h, W_hh)
 
-            #split Wxh contributions
-            ix, jx, fx, ox = tf.split(xh, 4, 1)
+        #split Wxh contributions
+        ix, jx, fx, ox = tf.split(xh, 4, 1)
 
-            ix = hyper_norm(ix, hyper_output, embedding_size, num_units, 'hyper_ix')
-            jx = hyper_norm(jx, hyper_output, embedding_size, num_units, 'hyper_jx')
-            fx = hyper_norm(fx, hyper_output, embedding_size, num_units, 'hyper_fx')
-            ox = hyper_norm(ox, hyper_output, embedding_size, num_units, 'hyper_ox')
+        ix = hyper_norm(ix, hyper_output, embedding_size, num_units, 'hyper_ix')
+        jx = hyper_norm(jx, hyper_output, embedding_size, num_units, 'hyper_jx')
+        fx = hyper_norm(fx, hyper_output, embedding_size, num_units, 'hyper_fx')
+        ox = hyper_norm(ox, hyper_output, embedding_size, num_units, 'hyper_ox')
 
-            #split Whh contributions
-            ih, jh, fh, oh = tf.split(hh, 4, 1)
-            ih = hyper_norm(ih, hyper_output, embedding_size, num_units, 'hyper_ih')
-            jh = hyper_norm(jh, hyper_output, embedding_size, num_units, 'hyper_jh')
-            fh = hyper_norm(fh, hyper_output, embedding_size, num_units, 'hyper_fh')
-            oh = hyper_norm(oh, hyper_output, embedding_size, num_units, 'hyper_oh')
+        #split Whh contributions
+        ih, jh, fh, oh = tf.split(hh, 4, 1)
+        ih = hyper_norm(ih, hyper_output, embedding_size, num_units, 'hyper_ih')
+        jh = hyper_norm(jh, hyper_output, embedding_size, num_units, 'hyper_jh')
+        fh = hyper_norm(fh, hyper_output, embedding_size, num_units, 'hyper_fh')
+        oh = hyper_norm(oh, hyper_output, embedding_size, num_units, 'hyper_oh')
 
-            #split bias      
-            ib, jb, fb, ob = tf.split(bias, 4, 0)
-            ib = hyper_bias(ib, hyper_output, embedding_size, num_units, 'hyper_ib')
-            jb = hyper_bias(jb, hyper_output, embedding_size, num_units, 'hyper_jb')
-            fb = hyper_bias(fb, hyper_output, embedding_size, num_units, 'hyper_fb')
-            ob = hyper_bias(ob, hyper_output, embedding_size, num_units, 'hyper_ob')
+        #split bias      
+        ib, jb, fb, ob = tf.split(bias, 4, 0)
+        ib = hyper_bias(ib, hyper_output, embedding_size, num_units, 'hyper_ib')
+        jb = hyper_bias(jb, hyper_output, embedding_size, num_units, 'hyper_jb')
+        fb = hyper_bias(fb, hyper_output, embedding_size, num_units, 'hyper_fb')
+        ob = hyper_bias(ob, hyper_output, embedding_size, num_units, 'hyper_ob')
 
-            #i = input_gate, j = new_input, f= forget_gate, o = output_gate
-            i = ix + ih + ib
-            j = jx + jh + jb
-            f = fx + fh + fb
-            o = ox + oh + ob
+        #i = input_gate, j = new_input, f= forget_gate, o = output_gate
+        i = ix + ih + ib
+        j = jx + jh + jb
+        f = fx + fh + fb
+        o = ox + oh + ob
 
-            if self.use_layer_norm:
-                i = layer_norm(i, scope='ln_i/')
-                j = layer_norm(j, scope='ln_j/')
-                f = layer_norm(f, scope='ln_f/')
-                o = layer_norm(o, scope='ln_o/')
+        if self.use_layer_norm:
+            i = layer_norm(i, scope='ln_i/')
+            j = layer_norm(j, scope='ln_j/')
+            f = layer_norm(f, scope='ln_f/')
+            o = layer_norm(o, scope='ln_o/')
 
-            if self.use_recurrent_dropout:
-                g = tf.nn.dropout(tf.tanh(j), self.dropout_keep_prob)
-            else:
-                g = tf.tanh(j)
+        if self.use_recurrent_dropout:
+            g = tf.nn.dropout(tf.tanh(j), self.dropout_keep_prob)
+        else:
+            g = tf.tanh(j)
 
-            new_c = c*tf.sigmoid(f+self.forget_bias) + tf.sigmoid(i)*g
-            if self.use_layer_norm:
-                new_h = tf.tanh(layer_norm(new_c, scope='ln_c/')) * tf.sigmoid(o)
-            else:
-                new_h = tf.tanh(new_c) * tf.sigmoid(o)
+        new_c = c*tf.sigmoid(f+self.forget_bias) + tf.sigmoid(i)*g
+        if self.use_layer_norm:
+            new_h = tf.tanh(layer_norm(new_c, scope='ln_c/')) * tf.sigmoid(o)
+        else:
+            new_h = tf.tanh(new_c) * tf.sigmoid(o)
 
-            hyper_c, hyper_h = hyper_new_state
-            new_total_c = tf.concat([new_c, hyper_c], 1)
-            new_total_h = tf.concat([new_h, hyper_h], 1)
+        hyper_c, hyper_h = hyper_new_state
+        new_total_c = tf.concat([new_c, hyper_c], 1)
+        new_total_h = tf.concat([new_h, hyper_h], 1)
 
         return new_h, tf.contrib.rnn.LSTMStateTuple(new_total_c, new_total_h)         
 
@@ -203,7 +200,7 @@ class LayerNormLSTMCell(tf.contrib.rnn.RNNCell):
             c, h = state
             concat = _linear([inputs, h], 4*self._num_units, False)
             i,j,f,o = tf.split(concat, 4, 1)
-
+            
             #add layer normalization for each gate before activation
             i = layer_norm(i, scope='i/')
             j = layer_norm(j, scope='j/')
@@ -218,74 +215,6 @@ class LayerNormLSTMCell(tf.contrib.rnn.RNNCell):
             new_state = tf.nn.rnn_cell.LSTMStateTuple(new_c, new_h)
 
             return new_h, new_state
-
-class DynamicLayerNormLSTMCell(tf.contrib.rnn.RNNCell):
-    def __init__(self, num_units, forget_bias=1.0, dynamic_num_units=128, dynamic_embedding_size=16):
-        """ code for 'Dynamic Layer Normalization for Adaptive Neural Acoustic Modeling in Speech Recognition'
-            the main idea is to creative two network: main netowrk and dynamic network. The dynamic one could 
-            generate scaling factor 'alpha' and shift factor 'beta' for layer normalization. Then, the main 
-            netowrk uses layer normalization for each gate (i, j, f, o) in LSTM.
-
-            args:
-                num_units: [int] hidden units num
-                forget_bias: [float] foget gate bias
-                dynamic_num_units: [int] hidden units num for dynamic network
-                dynamic_embedding_size: [int] output units num for dynamic network,
-                                              always smaller than 'dynamic_num_units'                                              
-        """
-        self.num_units = num_units
-        self.forget_bias = forget_bias
-        self.dynamic_num_units = dynamic_num_units
-        self.dynamic_embedding_size = dynamic_embedding_size
-
-        #define training units num
-        self.total_num_units = self.num_units + self.dynamic_num_units
-        #define dynamic cell
-        self.dynamic_cell = tf.contrib.rnn.BasicLSTMCell(self.dynamic_num_units)
-
-
-    @property
-    def output_size(self):
-        return self.num_units
-    @property
-    def state_size(self):
-        #In fact, both main network and dynamic netowrk need to be trained.
-        #Therefore, the state size should inlcude hidden units num of both network
-        return tf.contrib.rnn.LSTMStateTuple(self.num_units+self.dynamic_num_units,
-                                             self.num_units+self.dynamic_num_units)
-
-    def __call__(self, x, state, scope=None):
-        """
-            arg: 
-                x: [tensor] input tensor at a single time step with shape: [batch_szie, num_input]
-                state: [tuple] state at last time step 
-        """
-        with tf.variable_scope(scope or type(self).__name__):
-            total_c, total_h = state
-            c = total_c[:, 0:self.num_units]
-            h = total_h[:, 0:self.num_units]
-            dynamic_state = tf.contrib.rnn.LSTMStateTuple(total_c[:, self.num_units:],
-                                                          tocal_h[:, self.num_units:])
-            x_size = x.get_shape().as_list()[1]
-            batch_size = x.get_shape().as_list()[0]
-            embedding_size = self.dynamic_embedding_size
-            num_units = self.num_units
-
-            concat = _linear([x, h], 4*self.num_units, False)
-            #each gate has shape: [batch_size, num_units]
-            i, j, f, o = tf.split(concat, 4, 1)
-
-            #add dynamic layer normalization for each gate before activation
-            #how to get 'alpha' at each layer. 
-
-
-
-
-
-
-
-
-
 
 
 # test if the layer normarlization works well

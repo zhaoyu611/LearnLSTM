@@ -3,7 +3,6 @@ from __future__ import print_function
 import tensorflow as tf
 from tensorflow.contrib import rnn
 import layers
-import supercell
 # Import MNIST data
 from tensorflow.examples.tutorials.mnist import input_data
 mnist = input_data.read_data_sets("./data/", one_hot=True)
@@ -48,8 +47,6 @@ def RNN(x, weights, biases):
         return layers.LayerNormLSTMCell(num_hidden)
     def hyper_lstm_cell():
         return layers.HyperLSTMCell(num_hidden)
-    def super_lstm_cell():
-        return supercell.HyperLSTMCell(num_hidden)
     # Get lstm cell output
 
     stack_lstm_cell = rnn.MultiRNNCell([layer_norm_lstm_cell() for _ in range(2)])
