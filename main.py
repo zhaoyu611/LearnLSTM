@@ -49,7 +49,7 @@ def RNN(x, weights, biases):
         return layers.HyperLSTMCell(num_hidden)
     # Get lstm cell output
 
-    stack_lstm_cell = rnn.MultiRNNCell([layer_norm_lstm_cell() for _ in range(2)])
+    stack_lstm_cell = rnn.MultiRNNCell([hyper_lstm_cell() for _ in range(2)])
 
     outputs, states = rnn.static_rnn(stack_lstm_cell, x, dtype=tf.float32)
 

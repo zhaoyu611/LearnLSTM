@@ -61,7 +61,141 @@ def hyper_bias(layer, hyper_output, embedding_size, num_units,
 
     return layer + beta
 
+def get_mixture_coef(output, params, num_units):
+    """
+        args: 
+            output: [tensor] an 2D tensor got from network
+            params: [int] how many params need to be trained
+            KMIX: [int] num of mixture networks
+            num_units: [int] num of hidden units in main network
+        return: 
+            normed params of 'output', each param should be a 2D tensor, used for describing distrubtion
+    """
+    # out_pi = tf.placeholder(dtype=tf.float32, shape=[
+    #                         None, KMIX], name="mixparam")
+    # out_sigma = tf.placeholder(dtype=tf.float32, shape=[
+    #                            None, KMIX], name="mixparam")
+    # out_mu = tf.placeholder(dtype=tf.float32, shape=[
+    #                         None, KMIX], name="mixparam")
 
+    assert params == 2 * num_units + 1, "please confirm params = 2*num_units+1"
+
+    # a list with length [params],
+    # each element is tensor with shape: [batch_size, KMIX]
+    split_params = tf.split(output, params, 1)
+
+    out_mu_list = split_params[:num_units]
+    out_sigma_list = split_params[num_units:-1]
+    out_pi = split_params[-1]
+
+    out_sigma_list = [tf.exp(out_sigma) for out_sigma in out_sigma_list]
+
+    max_pi = tf.reduce_max(out_pi, 1, keep_dims=True)
+    out_pi = tf.subtract(out_pi, max_pi)
+    out_pi = tf.exp(out_pi)
+    normalize_pi = tf.reciprocal(tf.reduce_sum(out_pi, 1, keep_dims=True))
+    out_pi = tf.multiply(normalize_pi, out_pi)
+    return out_mu_list, out_sigma_list, out_pi
+
+
+def get_pi_idx(out_pi):
+        """ transforms result into random ensembles
+            args: 
+                out_pi: [tensor] a tensor with shape [batch_size, KMIX]
+            return: 
+                idx_pi:  [int] index of mixture network
+        """
+        
+        stop = tf.random_normal([1])
+
+        num_pi = out_pi.get_shape().as_list()[1]
+
+        for i in range(num_pi):
+            cum += out_pi[:, i]
+            idx_result = tf.cond(tf.less(stop, cum[0])[0], lambda: i, lambda: -1)
+
+            if idx_result>0:
+                return idx_result
+        print("No Pi is drawn, ERROR!")
+        return idx_result
+
+
+def generate_ensemble(out_mu_list, out_sigma_list, out_pi):
+    """sample based on normal distribution
+        args:
+            out_mu_list: [list] a list with length 'num_units', 
+                                each element is a tensor with lenth 'KMIX'
+            out_sigma_list: [list] a list with length 'num_units', 
+                                each element is a tensor with lenth 'KMIX'
+            out_pi: [list] a tensor with length 'KMIX', sum(out_pi) = 1
+        return:
+            result: [tensor] a 2D tensor with shape [batch_size, num_units]
+    """
+
+    assert len(out_mu_list) == len(out_sigma_list), "please confirm both lists have same length"
+    num_units = len(out_mu_list)
+
+    # initially random [0, 1]
+    
+    
+    gen_weight_list = []
+    # # normal random matrix (0.0, 1.0)
+    # rn = tf.random_normal([num_units])
+
+    mu = 0
+    std = 0
+    idx = 0
+ 
+    
+    for i in range(num_units):
+        # idx = get_pi_idx(out_pi)
+        idx=0
+        mu = out_mu_list[i][:, idx]
+        std = out_sigma_list[i][:, idx]
+        gen_weight_list.append(mu + tf.multiply(tf.random_normal([1]), std)) 
+    gen_weight = tf.stack(gen_weight_list,1)
+
+    return gen_weight
+
+
+
+
+def hyper_mix_norm(layer, hyper_output, embedding_size, num_units,
+                   scope="hyper", use_bias=True):
+    """
+        args:
+            layer: [tensor] input tensor need to be normed, with shape: [batch_size, num_units]
+            hyper_output: [tensor] output tensor with shape: [batch_size, embedding_size] 
+            num_units: [int] num of main network's hidden units
+
+            init_gamma= 0.10
+        return:
+            result: [tensor] normed output with the same shape of 'layer': [batch_size, num_units]
+    """
+
+    KMIX = 2  # mix 5 networks
+    #  there are KMIX networks in sum, and each network has 2 params: mu, stdeve
+    # Assume each unit is irrelevant, and include a weight 'theta'
+    params = 2 * num_units + 1 #257
+    NOUT = KMIX * params 
+    
+    with tf.variable_scope(scope):
+        with tf.variable_scope('zw'):
+            # zw is a tensor with shape: [batch_size, embedding_size]
+            zw = _linear(hyper_output, embedding_size, False)
+        with tf.variable_scope('alpha'):
+            # alpha is a tensor with shpae: [batch_size, NOUT]
+            alpha = _linear(zw, NOUT, False)
+
+        out_mu_list, out_sigma_list, out_pi = get_mixture_coef(alpha, params, num_units)
+
+
+        gen_weight = generate_ensemble(out_mu_list, out_sigma_list, out_pi)
+        result = tf.multiply(gen_weight, layer)
+    print("7777777777")
+    print(result)
+    print("7777777777")
+    return result
 
 class HyperLSTMCell(tf.contrib.rnn.RNNCell):
     def __init__(self, num_units, forget_bias=1.0, use_layer_norm=True, 
@@ -181,6 +315,9 @@ class HyperLSTMCell(tf.contrib.rnn.RNNCell):
             new_total_h = tf.concat([new_h, hyper_h], 1)
 
         return new_h, tf.contrib.rnn.LSTMStateTuple(new_total_c, new_total_h)         
+
+
+
 
 class LayerNormLSTMCell(tf.contrib.rnn.RNNCell):
 
