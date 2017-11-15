@@ -1,5 +1,5 @@
 from __future__ import print_function
-
+import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import rnn
 import layers
@@ -47,6 +47,8 @@ def RNN(x, weights, biases):
         return layers.LayerNormLSTMCell(num_hidden)
     def hyper_lstm_cell():
         return layers.HyperLSTMCell(num_hidden)
+    def hyper_MLP_lstm_cell():
+        return layers.MLPLSTMCell(num_hidden)
     # Get lstm cell output
 
     stack_lstm_cell = rnn.MultiRNNCell([hyper_lstm_cell() for _ in range(2)])
@@ -99,3 +101,6 @@ with tf.Session() as sess:
     test_label = mnist.test.labels[:test_len]
     print("Testing Accuracy:", \
         sess.run(accuracy, feed_dict={X: test_data, Y: test_label}))
+
+    num_vars = np.sum([np.prod(v.shape) for v in tf.trainable_variables()])
+    print("Trainable num is : ", num_vars)
