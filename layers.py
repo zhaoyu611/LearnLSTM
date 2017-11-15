@@ -22,8 +22,6 @@ def layer_norm(inp, eps=1e-5, scope=None):
     ln_inp = gain * ln_inp + bias   
     return ln_inp
 
-def dynamic_layer_norm(inp, eps=1e-5, scope=None):
-    pass
 
 
 def hyper_norm(layer, hyper_output, embedding_size, num_units,
@@ -60,142 +58,6 @@ def hyper_bias(layer, hyper_output, embedding_size, num_units,
             beta = _linear(zb, num_units, False)
 
     return layer + beta
-
-def get_mixture_coef(output, params, num_units):
-    """
-        args: 
-            output: [tensor] an 2D tensor got from network
-            params: [int] how many params need to be trained
-            KMIX: [int] num of mixture networks
-            num_units: [int] num of hidden units in main network
-        return: 
-            normed params of 'output', each param should be a 2D tensor, used for describing distrubtion
-    """
-    # out_pi = tf.placeholder(dtype=tf.float32, shape=[
-    #                         None, KMIX], name="mixparam")
-    # out_sigma = tf.placeholder(dtype=tf.float32, shape=[
-    #                            None, KMIX], name="mixparam")
-    # out_mu = tf.placeholder(dtype=tf.float32, shape=[
-    #                         None, KMIX], name="mixparam")
-
-    assert params == 2 * num_units + 1, "please confirm params = 2*num_units+1"
-
-    # a list with length [params],
-    # each element is tensor with shape: [batch_size, KMIX]
-    split_params = tf.split(output, params, 1)
-
-    out_mu_list = split_params[:num_units]
-    out_sigma_list = split_params[num_units:-1]
-    out_pi = split_params[-1]
-
-    out_sigma_list = [tf.exp(out_sigma) for out_sigma in out_sigma_list]
-
-    max_pi = tf.reduce_max(out_pi, 1, keep_dims=True)
-    out_pi = tf.subtract(out_pi, max_pi)
-    out_pi = tf.exp(out_pi)
-    normalize_pi = tf.reciprocal(tf.reduce_sum(out_pi, 1, keep_dims=True))
-    out_pi = tf.multiply(normalize_pi, out_pi)
-    return out_mu_list, out_sigma_list, out_pi
-
-
-def get_pi_idx(out_pi):
-        """ transforms result into random ensembles
-            args: 
-                out_pi: [tensor] a tensor with shape [batch_size, KMIX]
-            return: 
-                idx_pi:  [int] index of mixture network
-        """
-        
-        stop = tf.random_normal([1])
-
-        num_pi = out_pi.get_shape().as_list()[1]
-
-        for i in range(num_pi):
-            cum += out_pi[:, i]
-            idx_result = tf.cond(tf.less(stop, cum[0])[0], lambda: i, lambda: -1)
-
-            if idx_result>0:
-                return idx_result
-        print("No Pi is drawn, ERROR!")
-        return idx_result
-
-
-def generate_ensemble(out_mu_list, out_sigma_list, out_pi):
-    """sample based on normal distribution
-        args:
-            out_mu_list: [list] a list with length 'num_units', 
-                                each element is a tensor with lenth 'KMIX'
-            out_sigma_list: [list] a list with length 'num_units', 
-                                each element is a tensor with lenth 'KMIX'
-            out_pi: [list] a tensor with length 'KMIX', sum(out_pi) = 1
-        return:
-            result: [tensor] a 2D tensor with shape [batch_size, num_units]
-    """
-
-    assert len(out_mu_list) == len(out_sigma_list), "please confirm both lists have same length"
-    num_units = len(out_mu_list)
-
-    # initially random [0, 1]
-    
-    
-    gen_weight_list = []
-    # # normal random matrix (0.0, 1.0)
-    # rn = tf.random_normal([num_units])
-
-    mu = 0
-    std = 0
-    idx = 0
- 
-    
-    for i in range(num_units):
-        # idx = get_pi_idx(out_pi)
-        idx=0
-        mu = out_mu_list[i][:, idx]
-        std = out_sigma_list[i][:, idx]
-        gen_weight_list.append(mu + tf.multiply(tf.random_normal([1]), std)) 
-    gen_weight = tf.stack(gen_weight_list,1)
-
-    return gen_weight
-
-
-
-
-def hyper_mix_norm(layer, hyper_output, embedding_size, num_units,
-                   scope="hyper", use_bias=True):
-    """
-        args:
-            layer: [tensor] input tensor need to be normed, with shape: [batch_size, num_units]
-            hyper_output: [tensor] output tensor with shape: [batch_size, embedding_size] 
-            num_units: [int] num of main network's hidden units
-
-            init_gamma= 0.10
-        return:
-            result: [tensor] normed output with the same shape of 'layer': [batch_size, num_units]
-    """
-
-    KMIX = 2  # mix 5 networks
-    #  there are KMIX networks in sum, and each network has 2 params: mu, stdeve
-    # Assume each unit is irrelevant, and include a weight 'theta'
-    params = 2 * num_units + 1 #257
-    NOUT = KMIX * params 
-    
-    with tf.variable_scope(scope):
-        with tf.variable_scope('zw'):
-            # zw is a tensor with shape: [batch_size, embedding_size]
-            zw = _linear(hyper_output, embedding_size, False)
-        with tf.variable_scope('alpha'):
-            # alpha is a tensor with shpae: [batch_size, NOUT]
-            alpha = _linear(zw, NOUT, False)
-
-        out_mu_list, out_sigma_list, out_pi = get_mixture_coef(alpha, params, num_units)
-
-
-        gen_weight = generate_ensemble(out_mu_list, out_sigma_list, out_pi)
-        result = tf.multiply(gen_weight, layer)
-    print("7777777777")
-    print(result)
-    print("7777777777")
-    return result
 
 class HyperLSTMCell(tf.contrib.rnn.RNNCell):
     def __init__(self, num_units, forget_bias=1.0, use_layer_norm=True, 
@@ -361,12 +223,9 @@ class MLPLSTMCell(tf.contrib.rnn.RNNCell):
                 state: [tuple] state at last time step 
         """
         with tf.variable_scope(scope or type(self).__name__):
-            # total_c, total_h = state
-            # c = total_c[:, 0:self.num_units]
-            # h = total_h[:, 0:self.num_units]
+
             c, h = state
-            # hyper_state = tf.contrib.rnn.LSTMStateTuple(total_c[:, self.num_units:],
-            #                                              total_h[:, self.num_units:])
+        
             x_size = x.get_shape().as_list()[1]
             batch_size = x.get_shape().as_list()[0]
             embedding_size = self.hyper_embedding_size
@@ -380,8 +239,7 @@ class MLPLSTMCell(tf.contrib.rnn.RNNCell):
             #define hyper network input, shape : [batch_size, x_size+num_units]
             hyper_input = tf.concat([x,h], 1)
             hyper_output = hyper_input
-            # hyper_output, hyper_new_state = self.hyper_cell(hyper_input, hyper_state)
-
+           
             xh = tf.matmul(x, W_xh)
             hh = tf.matmul(h, W_hh)
 
@@ -430,9 +288,7 @@ class MLPLSTMCell(tf.contrib.rnn.RNNCell):
             else:
                 new_h = tf.tanh(new_c) * tf.sigmoid(o)
 
-            # hyper_c, hyper_h = hyper_new_state
-            # new_total_c = tf.concat([new_c, hyper_c], 1)
-            # new_total_h = tf.concat([new_h, hyper_h], 1)
+
             new_total_c = new_c
             new_total_h = new_h
 
@@ -476,72 +332,6 @@ class LayerNormLSTMCell(tf.contrib.rnn.RNNCell):
             new_state = tf.nn.rnn_cell.LSTMStateTuple(new_c, new_h)
 
             return new_h, new_state
-
-class DynamicLayerNormLSTMCell(tf.contrib.rnn.RNNCell):
-    def __init__(self, num_units, forget_bias=1.0, dynamic_num_units=128, dynamic_embedding_size=16):
-        """ code for 'Dynamic Layer Normalization for Adaptive Neural Acoustic Modeling in Speech Recognition'
-            the main idea is to creative two network: main netowrk and dynamic network. The dynamic one could 
-            generate scaling factor 'alpha' and shift factor 'beta' for layer normalization. Then, the main 
-            netowrk uses layer normalization for each gate (i, j, f, o) in LSTM.
-
-            args:
-                num_units: [int] hidden units num
-                forget_bias: [float] foget gate bias
-                dynamic_num_units: [int] hidden units num for dynamic network
-                dynamic_embedding_size: [int] output units num for dynamic network,
-                                              always smaller than 'dynamic_num_units'                                              
-        """
-        self.num_units = num_units
-        self.forget_bias = forget_bias
-        self.dynamic_num_units = dynamic_num_units
-        self.dynamic_embedding_size = dynamic_embedding_size
-
-        #define training units num
-        self.total_num_units = self.num_units + self.dynamic_num_units
-        #define dynamic cell
-        self.dynamic_cell = tf.contrib.rnn.BasicLSTMCell(self.dynamic_num_units)
-
-
-    @property
-    def output_size(self):
-        return self.num_units
-    @property
-    def state_size(self):
-        #In fact, both main network and dynamic netowrk need to be trained.
-        #Therefore, the state size should inlcude hidden units num of both network
-        return tf.contrib.rnn.LSTMStateTuple(self.num_units+self.dynamic_num_units,
-                                             self.num_units+self.dynamic_num_units)
-
-    def __call__(self, x, state, scope=None):
-        """
-            arg: 
-                x: [tensor] input tensor at a single time step with shape: [batch_szie, num_input]
-                state: [tuple] state at last time step 
-        """
-        with tf.variable_scope(scope or type(self).__name__):
-            total_c, total_h = state
-            c = total_c[:, 0:self.num_units]
-            h = total_h[:, 0:self.num_units]
-            dynamic_state = tf.contrib.rnn.LSTMStateTuple(total_c[:, self.num_units:],
-                                                          tocal_h[:, self.num_units:])
-            x_size = x.get_shape().as_list()[1]
-            batch_size = x.get_shape().as_list()[0]
-            embedding_size = self.dynamic_embedding_size
-            num_units = self.num_units
-
-            concat = _linear([x, h], 4*self.num_units, False)
-            #each gate has shape: [batch_size, num_units]
-            i, j, f, o = tf.split(concat, 4, 1)
-
-            #add dynamic layer normalization for each gate before activation
-            #how to get 'alpha' at each layer. 
-
-
-
-
-
-
-
 
 
 
